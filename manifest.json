@@ -1,0 +1,12 @@
+{
+  "id": "PokePCFollowers_VoxelMerge",
+  "name": "PokéPC Followers (Voxel Merge)",
+  "version": "1.2.0",
+  "entry": "main.lua",
+  "author": "Antigravity & User",
+  "description": "All 151 Gen 1 overworld followers with animated walking frames, Charmander starter fix, and full 3D Voxel compatibility for Red, Blue, and Yellow.",
+  "category": "GRAPHICS",
+  "permissions": [
+    "engine_internals"
+  ]
+}
