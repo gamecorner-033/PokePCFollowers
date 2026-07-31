@@ -43,6 +43,11 @@ An all-species overworld follower mod for **Pokémon Yellow (Gen 1 Recomp)**. Th
 
 * **Overworld Sprites**: Huge credit and special thanks to ShockSlayer and the makers of the legendary ROM hack **Pokémon Crystal Clear** for creating and providing the incredible Gen 1 & Gen 2 Pokémon overworld sprite sheets!
 * **Development**: Built with **vibe coding** and pair programming for the `pokemon-gen1-recomp` project.
+* Thanks to these Discord members for the contribution to the recomp, this mod and voxel:
+Sleepy
+TheKingOfSpain
+bryanthaboi
+
 
 ## Voxel compatibility
 
