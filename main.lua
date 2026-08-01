@@ -1,250 +1,375 @@
+-- PokéPC Followers for Pokémon Red, Blue, and Yellow (Gen1Recomp).
+--
+-- Red and Blue do not contain Yellow's SPRITE_PIKACHU record or companion
+-- spawn flag.  Register the missing record in those games, patch it in
+-- Yellow, and reuse Gen1Recomp's trailing movement in all three versions.
+
 return function(mod)
-  print("[PokePCFollowers-VoxelMerge] Initializing Followers Mod (All 151 + 3D Voxel Compatible)...")
-
-  local Game = require("src.core.Game")
-  local PaletteFX = require("src.render.PaletteFX")
-  local SpriteRenderer = require("src.render.SpriteRenderer")
-  local Assets = require("src.render.Assets")
-  local BattleState = require("src.battle.BattleState")
-  local PikachuFollower = require("src.world.PikachuFollower")
   local GameVersion = require("src.core.GameVersion")
-  local Strings = require("src.core.Strings")
-  local PartyMenu = require("src.ui.PartyMenu")
+  local version = GameVersion.get()
+  if version ~= "red" and version ~= "blue" and version ~= "yellow" then
+    mod.log:info("PokéPC Followers: unsupported game version %s",
+      tostring(version))
+    mod.exports.supported = false
+    return
+  end
 
-  -- 1. Register SPRITE_PIKACHU with walker = true and trueColor = true for 3D Voxel compatibility
-  mod.content.sprites:patch("SPRITE_PIKACHU", {
-    image = mod.path .. "/assets/sprites/follower_CHARMANDER.png",
+  local FALLBACK_SPECIES = "CHARMANDER"
+  local SPRITE_ID = "SPRITE_PIKACHU"
+  local STATE_KEY = "__pokepcFollowersUniversal"
+  local OPPOSITE = {
+    up = "down", down = "up", left = "right", right = "left",
+  }
+
+  local PikachuFollower = require("src.world.PikachuFollower")
+  local SpriteRenderer = require("src.render.SpriteRenderer")
+  local Strings = require("src.core.Strings")
+
+  local function assetPath(species)
+    species = type(species) == "string" and species or FALLBACK_SPECIES
+    return mod.path .. "/assets/sprites/follower_" .. species .. ".png"
+  end
+
+  -- Yellow already owns this record; Red and Blue do not.  trueColor
+  -- preserves the supplied colors in 2D and makes resolveImage() return the
+  -- same live sheet to voxel/tilt renderers.
+  local followerSprite = {
+    id = SPRITE_ID,
+    image = assetPath(FALLBACK_SPECIES),
     frames = 6,
     walker = true,
     trueColor = true,
-  })
+  }
+  if mod.content.sprites:get(SPRITE_ID) then
+    mod.content.sprites:patch(SPRITE_ID, followerSprite)
+  else
+    mod.content.sprites:register(SPRITE_ID, followerSprite)
+  end
 
-  -- 2. Dynamic Sprite Cache: Loads and caches follower_<species>.png on demand for all 151 Gen 1 Pokemon
-  local followerImgCache = {}
-  local function getFollowerImage(species)
-    if not species then species = "CHARMANDER" end
-    if not followerImgCache[species] then
-      local spritePath = mod.path .. "/assets/sprites/follower_" .. tostring(species) .. ".png"
-      local ok, img = pcall(Assets.image, spritePath)
-      if ok and img then
-        followerImgCache[species] = img
-      else
-        followerImgCache[species] = Assets.image(mod.path .. "/assets/sprites/follower_CHARMANDER.png")
+  local function monKey(mon)
+    if type(mon) ~= "table" then return nil end
+    local dvs = type(mon.dvs) == "table" and mon.dvs or {}
+    return table.concat({
+      tostring(mon.otId or -1),
+      tostring(dvs.attack or -1),
+      tostring(dvs.defense or -1),
+      tostring(dvs.speed or -1),
+      tostring(dvs.special or -1),
+      tostring(mon.catchRate or -1),
+    }, ":")
+  end
+
+  local function healthy(mon)
+    return type(mon) == "table" and (tonumber(mon.hp) or 0) > 0
+  end
+
+  -- A DV/OT fingerprint follows the chosen individual across party
+  -- reordering and evolution.  selected_slot disambiguates the extremely
+  -- unlikely case of two party members with the same fingerprint.
+  local function selectedMon(game, needHealthy)
+    local party = game and game.save and game.save.party or {}
+    local selectedKey = mod.save:get("selected_mon")
+    local selectedSlot = tonumber(mod.save:get("selected_slot"))
+
+    if selectedKey then
+      local atSlot = selectedSlot and party[selectedSlot]
+      if atSlot and monKey(atSlot) == selectedKey
+          and (not needHealthy or healthy(atSlot)) then
+        return atSlot, selectedSlot
+      end
+      for i, mon in ipairs(party) do
+        if monKey(mon) == selectedKey and (not needHealthy or healthy(mon)) then
+          return mon, i
+        end
       end
     end
-    return followerImgCache[species]
-  end
 
-  -- 3. Resolve Active Follower Mon from Save Data (Explicit Selection or Default Party Slot 1)
-  local function getActiveFollowerMon(game)
-    if not game or not game.save or not game.save.party then return nil end
-    local party = game.save.party
-    if #party == 0 then return nil end
-
-    -- Check if user explicitly selected a party slot
-    local idx = game.save.followerPartyIndex
-    if idx and type(idx) == "number" and party[idx] and (party[idx].hp or 0) > 0 then
-      return party[idx]
-    end
-
-    -- Default to Party Slot 1 if healthy
-    if party[1] and (party[1].hp or 0) > 0 then
-      return party[1]
-    end
-
-    -- Fallback to first healthy mon in party
-    for _, mon in ipairs(party) do
-      if (mon.hp or 0) > 0 then return mon end
-    end
-
-    return party[1]
-  end
-
-  -- 4. 3D Voxel compatibility & live texture resolution
-  local origResolveImage = SpriteRenderer.resolveImage
-  SpriteRenderer.resolveImage = function(self, ...)
-    if self.def and self.def.id == "SPRITE_PIKACHU" then
-      local activeMon = getActiveFollowerMon(Game)
-      local species = activeMon and activeMon.species or "CHARMANDER"
-      return getFollowerImage(species)
-    end
-    return origResolveImage(self, ...)
-  end
-
-  local function syncLiveFollowerDef(game, ow)
-    local npc = ow and PikachuFollower.current and PikachuFollower.current(ow)
-    if not npc or not npc.sprite or not npc.sprite.def then return end
-    local activeMon = getActiveFollowerMon(game)
-    local species = activeMon and activeMon.species or "CHARMANDER"
-    local path = mod.path .. "/assets/sprites/follower_" .. tostring(species) .. ".png"
-    local ok, image = pcall(Assets.image, path)
-    if not ok or not image then return end
-
-    if npc._pokepcFollowerSpecies ~= species
-       or npc.sprite.image ~= image
-       or npc.sprite.def.image ~= path then
-      npc.sprite.def.image = path
-      npc.sprite.def.frames = 6
-      npc.sprite.def.walker = true
-      npc.sprite.def.trueColor = true
-      npc.sprite = SpriteRenderer.new(npc.sprite.def, npc.id)
-      npc._pokepcFollowerSpecies = species
-    else
-      npc.sprite.def.image = path
-      npc.sprite.def.frames = 6
-      npc.sprite.def.walker = true
-      npc.sprite.def.trueColor = true
-    end
-  end
-
-  local origFollowerUpdate = PikachuFollower.update
-  PikachuFollower.update = function(game, ow, ...)
-    local result = origFollowerUpdate(game, ow, ...)
-    pcall(syncLiveFollowerDef, game, ow)
-    return result
-  end
-
-  -- 5. Single Post-Zone Redraw: Draws ONE single full-color GBA follower sprite matching active species
-  local origSpriteDraw = SpriteRenderer.draw
-  function SpriteRenderer:draw(px, py, camX, camY, facing, walkPhase, stepFlip)
-    if self.def and self.def.id == "SPRITE_PIKACHU" then
-      local activeMon = getActiveFollowerMon(Game)
-      local species = activeMon and activeMon.species or "CHARMANDER"
-      local followerImg = getFollowerImage(species)
-
-      local x = math.floor(px - camX)
-      local y = math.floor(py - camY) - 4
-
-      local STAND = SpriteRenderer.STAND
-      local WALK = SpriteRenderer.WALK
-      local dirMap = (walkPhase == 1) and WALK or STAND
-      local frameIdx = dirMap[facing] or 0
-      local quad = self.frames[frameIdx]
-      local flip = (facing == "right") or (stepFlip and (facing == "up" or facing == "down"))
-
-      local drawX = flip and (x + 16) or x
-      local flipSx = flip and -1 or 1
-
-      PaletteFX.markSpriteRedraw(followerImg, quad, drawX, y, flipSx, nil, false)
-      return
-    end
-
-    return origSpriteDraw(self, px, py, camX, camY, facing, walkPhase, stepFlip)
-  end
-
-  -- 6. Hook Party Menu Submenu ("FOLLOWER" UI Option)
-  mod.events:on("ui.party.submenu", function(e)
-    if not e.ctx or e.ctx.battle or not e.items or not e.mon or not e.game then return end
-
-    local mon = e.mon
-    local party = e.game.save.party or {}
-    local partyIndex = 1
-    for i, pmon in ipairs(party) do
-      if pmon == mon then partyIndex = i; break end
-    end
-
-    local activeMon = getActiveFollowerMon(e.game)
-    local isCurrent = (activeMon == mon)
-    local label = isCurrent and "FOLLOWING" or "FOLLOWER"
-
-    table.insert(e.items, {
-      label = Strings(label),
-      onSelect = function(selectedMon, game)
-        game.save.followerPartyIndex = partyIndex
-        game.save.followerSpecies = selectedMon.species
-
-        pcall(function() syncLiveFollowerDef(game, game.overworld) end)
-
-        local Sound = require("src.core.Sound")
-        Sound.play(game.data, "Swap")
-
-        local def = game.data.pokemon[selectedMon.species]
-        local name = selectedMon.nickname or (def and def.name) or selectedMon.species
-
-        local TextBox = require("src.render.TextBox")
-        game.stack:push(TextBox.new(game, Strings("%s is now\nyour follower!", name)))
+    -- Migrate the original release's save-table slot selection lazily.  A
+    -- later explicit choice is stored in mod.save using the stable key above.
+    if not selectedKey then
+      local legacySlot = tonumber(game and game.save
+        and game.save.followerPartyIndex)
+      local legacy = legacySlot and party[legacySlot]
+      if legacy and (not needHealthy or healthy(legacy)) then
+        return legacy, legacySlot
       end
-    })
-  end)
-
-  -- PartyMenu update hook for party order swaps
-  local origPartyMenuUpdate = PartyMenu.update
-  PartyMenu.update = function(self, dt)
-    local result = origPartyMenuUpdate(self, dt)
-    pcall(function()
-      local game = self.game
-      local ow = game and game.overworld
-      if not game or not ow then return end
-      local follower = PikachuFollower.current and PikachuFollower.current(ow)
-      if not follower then return end
-      local active = getActiveFollowerMon(game)
-      local species = active and active.species or "CHARMANDER"
-      if follower._pokepcFollowerSpecies ~= species then
-        syncLiveFollowerDef(game, ow)
-      end
-    end)
-    return result
-  end
-
-  -- 7. Yellow-only Oak/Pikachu story edits
-  if GameVersion.isYellow() then
-    mod.content.strings:override("PIKACHU", "CHARMANDER")
-    mod.content.text:override("_OaksLabPikachuDislikesPokeballsText1", "OAK: What?")
-    mod.content.text:override("_OaksLabPikachuDislikesPokeballsText2", "OAK: It's strange!\nCHARMANDER hates being\nin a POKéBALL!\fYou should keep it\nwith you!\fIt should be happy\nif it walks with\nyou!")
-    mod.content.text:override("_OaksLabOak1YouShouldTalkToIt", "OAK: Look at it!\nCHARMANDER seems to\nlike you!")
-
-    local origNewWild = BattleState.newWild
-    BattleState.newWild = function(game, species, level, ...)
-      if species == "PIKACHU" and level == 5 then
-        species = "CHARMANDER"
-      end
-      return origNewWild(game, species, level, ...)
     end
-  end
 
-  -- 8. Multi-version follower spawning hook (Red, Blue, Yellow)
-  PikachuFollower.starterInParty = function(save, needHealthy)
-    for _, mon in ipairs(save.party or {}) do
-      if not needHealthy or (mon.hp or 0) > 0 then
-        return mon
-      end
+    for i, mon in ipairs(party) do
+      if not needHealthy or healthy(mon) then return mon, i end
     end
     return nil
   end
 
-  local newShouldSpawn = function(game, ow)
-    local version = GameVersion.get()
-    if version ~= "red" and version ~= "blue" and version ~= "yellow" then
-      return false
-    end
-
-    local save = game.save
-    if save.onBike or (ow.player and ow.player.surfing) then return false end
-    if not (game.data.sprites and game.data.sprites.SPRITE_PIKACHU) then
-      return false
-    end
-
-    for _, mon in ipairs(save.party or {}) do
-      if (mon.hp or 0) > 0 then return true end
-    end
-    return false
+  local function configureSpriteDef(game, mon)
+    local sprites = game and game.data and game.data.sprites
+    local def = sprites and sprites[SPRITE_ID]
+    if not def then return nil end
+    local species = mon and mon.species or FALLBACK_SPECIES
+    def.image = assetPath(species)
+    def.frames = 6
+    def.walker = true
+    def.trueColor = true
+    return def, species
   end
 
-  local function patchUpvalue(fn, upvalueName, newVal)
+  local function syncFollower(game, ow)
+    if not (game and ow) then return nil end
+    local mon = selectedMon(game, true)
+    local def, species = configureSpriteDef(game, mon)
+    if not (def and mon) then return nil end
+
+    local npc = PikachuFollower.current(ow)
+    if not npc then return nil end
+    if npc._pokepcFollowerSpecies ~= species
+        or not npc.sprite then
+      npc.sprite = SpriteRenderer.new(def, npc.id)
+      npc._pokepcFollowerSpecies = species
+    end
+    return npc
+  end
+
+  -- Return the upvalue's old value as well as success.  update() and
+  -- onMapEntered() share Yellow's local shouldSpawn closure, so patching the
+  -- original update function (not our wrapper) changes both call sites.
+  local function replaceUpvalue(fn, wanted, replacement)
+    if type(fn) ~= "function" or not (debug and debug.getupvalue
+        and debug.setupvalue) then
+      return false
+    end
     local i = 1
     while true do
-      local name = debug.getupvalue(fn, i)
-      if not name then break end
-      if name == upvalueName then
-        debug.setupvalue(fn, i, newVal)
-        break
+      local name, old = debug.getupvalue(fn, i)
+      if not name then return false end
+      if name == wanted then
+        debug.setupvalue(fn, i, replacement)
+        return true, old
       end
       i = i + 1
     end
   end
 
-  patchUpvalue(PikachuFollower.update, "shouldSpawn", newShouldSpawn)
-  patchUpvalue(PikachuFollower.onMapEntered, "shouldSpawn", newShouldSpawn)
+  -- Clean up our own wrappers before a developer-mode hot reload.  Direct
+  -- engine patches are outside the registry journal, so making this
+  -- idempotent prevents stacked update/talk callbacks after F5.
+  local previous = rawget(PikachuFollower, STATE_KEY)
+  if previous and type(previous.restore) == "function" then
+    pcall(previous.restore)
+  end
 
-  print("[PokePCFollowers-VoxelMerge] Mod initialized successfully.")
+  local originalUpdate = PikachuFollower.update
+  local originalOnMapEntered = PikachuFollower.onMapEntered
+  local originalTalk = PikachuFollower.talk
+  local originalStarterInParty = PikachuFollower.starterInParty
+  local BattleState = version == "yellow"
+    and require("src.battle.BattleState") or nil
+  local originalNewWild = BattleState and BattleState.newWild or nil
+  local wrappedNewWild
+  local vanillaShouldSpawn
+
+  local function shouldSpawn(game, ow)
+    local activeVersion = GameVersion.get()
+    if activeVersion ~= "red" and activeVersion ~= "blue"
+        and activeVersion ~= "yellow" then
+      return vanillaShouldSpawn and vanillaShouldSpawn(game, ow) or false
+    end
+    local save = game and game.save
+    if not (save and ow) then return false end
+    if save.onBike or (ow.player and ow.player.surfing) then return false end
+    if not (game.data and game.data.sprites
+        and game.data.sprites[SPRITE_ID]) then
+      return false
+    end
+    return selectedMon(game, true) ~= nil
+  end
+
+  local patched, oldShouldSpawn =
+    replaceUpvalue(originalUpdate, "shouldSpawn", shouldSpawn)
+  if not patched then
+    mod.log:error(
+      "could not patch follower spawning; this Gen1Recomp build is unsupported")
+    return
+  end
+  vanillaShouldSpawn = oldShouldSpawn
+
+  -- Yellow's happiness and emotion code asks this helper for the companion.
+  -- Keep the upstream all-species behavior instead of narrowing it back to
+  -- Pikachu, while spawn/render selection remains fingerprint-based.
+  local wrappedStarterInParty = function(save, needHealthy)
+    for _, mon in ipairs(save.party or {}) do
+      if not needHealthy or healthy(mon) then return mon end
+    end
+    return nil
+  end
+  PikachuFollower.starterInParty = wrappedStarterInParty
+
+  -- Preserve the original Yellow story conversion.  Red and Blue never
+  -- receive these text or encounter changes.
+  if version == "yellow" then
+    mod.content.strings:override("PIKACHU", "CHARMANDER")
+    mod.content.text:override("_OaksLabPikachuDislikesPokeballsText1",
+      "OAK: What?")
+    mod.content.text:override("_OaksLabPikachuDislikesPokeballsText2",
+      "OAK: It's strange!\nCHARMANDER hates being\nin a POKéBALL!\f"
+        .. "You should keep it\nwith you!\fIt should be happy\n"
+        .. "if it walks with\nyou!")
+    mod.content.text:override("_OaksLabOak1YouShouldTalkToIt",
+      "OAK: Look at it!\nCHARMANDER seems to\nlike you!")
+
+    wrappedNewWild = function(game, species, level, ...)
+      if species == "PIKACHU" and level == 5 then species = "CHARMANDER" end
+      return originalNewWild(game, species, level, ...)
+    end
+    BattleState.newWild = wrappedNewWild
+  end
+
+  local wrappedOnMapEntered
+  wrappedOnMapEntered = function(game, ow, opts)
+    configureSpriteDef(game, selectedMon(game, true))
+    local result = originalOnMapEntered(game, ow, opts)
+    syncFollower(game, ow)
+    return result
+  end
+
+  local wrappedUpdate
+  wrappedUpdate = function(game, ow)
+    configureSpriteDef(game, selectedMon(game, true))
+    local result = originalUpdate(game, ow)
+    syncFollower(game, ow)
+    return result
+  end
+
+  local wrappedTalk
+  wrappedTalk = function(game, ow, npc, done)
+    if GameVersion.get() ~= "red" and GameVersion.get() ~= "blue" then
+      return originalTalk(game, ow, npc, done)
+    end
+
+    local mon = selectedMon(game, true)
+    if not mon then
+      if done then done() end
+      return
+    end
+
+    -- Land a just-finishing follow step before opening the message, matching
+    -- Yellow's own talk path and avoiding a frozen half-tile sprite.
+    if npc.moving then
+      npc.cellX = npc.targetX or npc.cellX
+      npc.cellY = npc.targetY or npc.cellY
+      npc.targetX, npc.targetY = nil, nil
+      npc.px, npc.py = npc.cellX * 16, npc.cellY * 16
+      npc.moving, npc.marching = false, false
+      npc.progress, npc.hopStep = 0, nil
+    end
+    npc.idle, npc.goalX, npc.goalY = nil, nil, nil
+    if npc.facePlayer and ow.player then npc:facePlayer(ow.player) end
+    if ow.player then
+      ow.player.facing = OPPOSITE[npc.facing] or ow.player.facing
+    end
+
+    pcall(function()
+      require("src.core.Sound").playCry(game.data, mon.species)
+    end)
+    local def = game.data.pokemon and game.data.pokemon[mon.species]
+    local name = mon.nickname or (def and def.name) or mon.species
+    local text = Strings("%s is following\nyou!", name)
+    local TextBox = require("src.render.TextBox")
+    game.stack:push(TextBox.new(game, text, done))
+  end
+
+  PikachuFollower.onMapEntered = wrappedOnMapEntered
+  PikachuFollower.update = wrappedUpdate
+  PikachuFollower.talk = wrappedTalk
+
+  local state = {
+    originalUpdate = originalUpdate,
+    originalOnMapEntered = originalOnMapEntered,
+    originalTalk = originalTalk,
+    originalStarterInParty = originalStarterInParty,
+    originalNewWild = originalNewWild,
+    wrapperNewWild = wrappedNewWild,
+    wrapperUpdate = wrappedUpdate,
+    wrapperOnMapEntered = wrappedOnMapEntered,
+    wrapperTalk = wrappedTalk,
+    wrapperStarterInParty = wrappedStarterInParty,
+    originalShouldSpawn = vanillaShouldSpawn,
+  }
+  state.restore = function()
+    replaceUpvalue(originalUpdate, "shouldSpawn", vanillaShouldSpawn)
+    if PikachuFollower.update == wrappedUpdate then
+      PikachuFollower.update = originalUpdate
+    end
+    if PikachuFollower.onMapEntered == wrappedOnMapEntered then
+      PikachuFollower.onMapEntered = originalOnMapEntered
+    end
+    if PikachuFollower.talk == wrappedTalk then
+      PikachuFollower.talk = originalTalk
+    end
+    if PikachuFollower.starterInParty == wrappedStarterInParty then
+      PikachuFollower.starterInParty = originalStarterInParty
+    end
+    if BattleState and BattleState.newWild == wrappedNewWild then
+      BattleState.newWild = originalNewWild
+    end
+    if rawget(PikachuFollower, STATE_KEY) == state then
+      rawset(PikachuFollower, STATE_KEY, nil)
+    end
+  end
+  rawset(PikachuFollower, STATE_KEY, state)
+
+  local function selectFollower(mon, game, quiet)
+    if not (mon and game and healthy(mon)) then return false end
+    local party = game.save and game.save.party or {}
+    local slot
+    for i, candidate in ipairs(party) do
+      if candidate == mon then slot = i break end
+    end
+    if not slot then return false end
+
+    mod.save:set("selected_mon", monKey(mon))
+    mod.save:set("selected_slot", slot)
+    syncFollower(game, game.overworld)
+
+    if not quiet then
+      pcall(function()
+        require("src.core.Sound").play(game.data, "Swap")
+      end)
+      local def = game.data.pokemon and game.data.pokemon[mon.species]
+      local name = mon.nickname or (def and def.name) or mon.species
+      local text = Strings("%s is now your\nfollower!", name)
+      local TextBox = require("src.render.TextBox")
+      game.stack:push(TextBox.new(game, text))
+    end
+    return true
+  end
+
+  mod.hooks:wrap("ui.party.submenu", function(next, game, items, mon, ctx)
+    local out = next(game, items, mon, ctx)
+    if type(out) ~= "table" or (ctx and ctx.battle) or not healthy(mon) then
+      return out
+    end
+    local active = selectedMon(game, true)
+    local label = Strings(active == mon and "FOLLOWING" or "FOLLOWER")
+    out[#out + 1] = {
+      label = label,
+      onSelect = function(selected, selectedGame)
+        selectFollower(selected, selectedGame, false)
+      end,
+    }
+    return out
+  end)
+
+  -- Small, stable test/debug surface.  It also makes the selection behavior
+  -- inspectable from Gen1Recomp's developer console without reaching into
+  -- locals or save.modData directly.
+  mod.exports.supported = true
+  mod.exports.activeMon = function(game) return selectedMon(game, true) end
+  mod.exports.assetPath = assetPath
+  mod.exports.shouldSpawn = shouldSpawn
+  mod.exports.sync = syncFollower
+  mod.exports.select = selectFollower
+  mod.exports.restore = state.restore
+
+  local labels = { red = "Red", blue = "Blue", yellow = "Yellow" }
+  mod.log:info("PokéPC Followers loaded for Pokémon %s", labels[version])
 end
