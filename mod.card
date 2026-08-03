@@ -1,0 +1,20 @@
+{
+  "title": "PokéPC Followers Mod",
+  "summary": "All 151 Gen 1 overworld followers with voxel/tilt compatibility for Red, Blue, and Yellow.",
+  "author": "Antigravity & User",
+  "version": "1.1.1",
+  "tags": [
+    "graphics",
+    "followers",
+    "ui"
+  ],
+  "features": [
+    "All 151 Gen 1 Pokémon overworld sprites supported",
+    "Party Slot 1 default follower with automatic lead switching",
+    "Party Menu 'FOLLOWER' UI option for explicit follower selection",
+    "Full-color GBA overworld graphics over colorized terrain",
+    "Red and Blue follower spawning without Yellow-only story flags",
+    "Animated overworld walking frames enabled for all follower sprites"
+  ],
+  "description": "All 151 Gen 1 overworld followers with Dramatic Shape voxel/tilt compatibility for Red, Blue, and Yellow."
+}
