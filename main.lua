@@ -206,8 +206,10 @@ return function(mod)
 
   -- Hybrid Active Pokemon Selection
   local function getActiveFollowerMon(game, needHealthy)
-    if not (game and game.save and game.save.party) then return nil end
-    local party = game.save.party
+    if needHealthy == nil then needHealthy = true end
+    local g = game or Game
+    if not (g and g.save and g.save.party) then return nil end
+    local party = g.save.party
     if #party == 0 then return nil end
 
     if mod.save then
@@ -227,7 +229,7 @@ return function(mod)
       end
     end
 
-    local idx = game.save.followerPartyIndex
+    local idx = g.save.followerPartyIndex
     if idx and type(idx) == "number" and party[idx] and (not needHealthy or healthy(party[idx])) then
       return party[idx], idx
     end
@@ -241,7 +243,8 @@ return function(mod)
   end
 
   local function configureSpriteDef(game, mon)
-    local sprites = game and game.data and game.data.sprites
+    local g = game or Game
+    local sprites = g and g.data and g.data.sprites
     local def = sprites and sprites[SPRITE_ID]
     if not def then return nil end
     if not mon then return nil end
@@ -255,14 +258,15 @@ return function(mod)
   end
 
   local function syncLiveFollowerDef(game, ow)
-    if not (game and ow) then return nil end
-    local mon = getActiveFollowerMon(game, true)
+    local g = game or Game
+    if not (g and ow) then return nil end
+    local mon = getActiveFollowerMon(g, true)
     if not mon then 
       purgeFollowerEntities(ow)
       return nil 
     end
 
-    local def, species, path = configureSpriteDef(game, mon)
+    local def, species, path = configureSpriteDef(g, mon)
     if not (def and mon) then return nil end
 
     local npc = PikachuFollower.current and PikachuFollower.current(ow)
@@ -274,6 +278,7 @@ return function(mod)
     if npc._pokepcFollowerSpecies ~= species or not npc.sprite or npc.sprite.image ~= image then
       npc.sprite = SpriteRenderer.new(def, npc.id)
       npc._pokepcFollowerSpecies = species
+      npc._pokepcFollowerMonKey = monKey(mon)
     else
       npc.sprite.def.image = path
       npc.sprite.def.frames = 6
@@ -313,16 +318,17 @@ return function(mod)
   local vanillaShouldSpawn
 
   local function shouldSpawn(game, ow)
-    local save = game and game.save
+    local g = game or Game
+    local save = g and g.save
     if not (save and ow) then return false end
 
     -- Base checks: valid party, not biking, not surfing
     if not save.party or #save.party == 0 then return false end
     if save.onBike or (ow.player and ow.player.surfing) then return false end
-    if getActiveFollowerMon(game, true) == nil then return false end
+    if getActiveFollowerMon(g, true) == nil then return false end
 
     -- Sprite registry check
-    if not (game.data and game.data.sprites and game.data.sprites[SPRITE_ID]) then
+    if not (g.data and g.data.sprites and g.data.sprites[SPRITE_ID]) then
       return false
     end
 
@@ -355,7 +361,7 @@ return function(mod)
   if origResolveImage then
     SpriteRenderer.resolveImage = function(self, ...)
       if self and self.def and self.def.id == SPRITE_ID then
-        local activeMon = getActiveFollowerMon(Game, false)
+        local activeMon = getActiveFollowerMon(Game, true) or getActiveFollowerMon(Game, false)
         if activeMon then
           local species = activeMon.species or FALLBACK_SPECIES
           return getFollowerImage(species)
@@ -368,7 +374,7 @@ return function(mod)
   local origSpriteDraw = SpriteRenderer.draw
   SpriteRenderer.draw = function(self, px, py, camX, camY, facing, walkPhase, stepFlip)
     if self and self.def and self.def.id == SPRITE_ID then
-      local activeMon = getActiveFollowerMon(Game, false)
+      local activeMon = getActiveFollowerMon(Game, true) or getActiveFollowerMon(Game, false)
       if not activeMon then return end
       local species = activeMon.species or FALLBACK_SPECIES
       local followerImg = getFollowerImage(species)
@@ -396,26 +402,32 @@ return function(mod)
 
   -- Update / Map / Interaction Hooks
   local wrappedOnMapEntered = function(game, ow, opts)
-    local mon = getActiveFollowerMon(game, true)
-    if mon then configureSpriteDef(game, mon) end
-    local result = originalOnMapEntered and originalOnMapEntered(game, ow, opts) or nil
-    if ow and ow.entities and not shouldSpawn(game, ow) then
+    local g = game or Game
+    local mon = getActiveFollowerMon(g, true)
+    if mon then configureSpriteDef(g, mon) end
+
+    local result = originalOnMapEntered and originalOnMapEntered(g, ow, opts) or nil
+
+    if ow and ow.entities and not shouldSpawn(g, ow) then
       purgeFollowerEntities(ow)
     else
-      syncLiveFollowerDef(game, ow)
+      syncLiveFollowerDef(g, ow)
     end
     return result
   end
 
   local wrappedUpdate = function(game, ow, ...)
-    if ow and not shouldSpawn(game, ow) then
-      purgeFollowerEntities(ow)
+    local g = game or Game
+    if not shouldSpawn(g, ow) then
+      if ow then purgeFollowerEntities(ow) end
       return
     end
-    local mon = getActiveFollowerMon(game, true)
-    if mon then configureSpriteDef(game, mon) end
-    local result = originalUpdate and originalUpdate(game, ow, ...) or nil
-    pcall(syncLiveFollowerDef, game, ow)
+
+    local mon = getActiveFollowerMon(g, true)
+    if mon then configureSpriteDef(g, mon) end
+
+    local result = originalUpdate and originalUpdate(g, ow, ...) or nil
+    pcall(syncLiveFollowerDef, g, ow)
     return result
   end
 
@@ -508,7 +520,7 @@ return function(mod)
         if not game or not ow then return end
         local follower = PikachuFollower.current and PikachuFollower.current(ow)
         if not follower then return end
-        local active = getActiveFollowerMon(game, false)
+        local active = getActiveFollowerMon(game, true)
         if not active then return end
         local species = active.species or FALLBACK_SPECIES
         if follower._pokepcFollowerSpecies ~= species then
