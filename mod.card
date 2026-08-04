@@ -32,6 +32,10 @@ return {
       who = "Roxas2712",
       for_ = "follower support in Red and Blue",
     },
+{
+      who = "Gamecorner33",
+      for_ = "initial mod creation",
+    },
     {
       who = "TheRhysWyrill",
       for_ = "color support of party Pokémon",
