@@ -28,7 +28,7 @@ return function(mod)
   local STATE_KEY = "__pokepcFollowersUniversal"
   local OPPOSITE = { up = "down", down = "up", left = "right", right = "left" }
   local function colorMode()
-    return mod.options and mod.options:get("color_mode") ~= "gbc"
+	return PaletteFX and PaletteFX.mode == "redpp"
   end
 
   -- Helper to scrub active follower/pikachu entities entirely from overworld state
@@ -372,32 +372,35 @@ return function(mod)
   end
 
   local origSpriteDraw = SpriteRenderer.draw
-  SpriteRenderer.draw = function(self, px, py, camX, camY, facing, walkPhase, stepFlip)
-    if self and self.def and self.def.id == SPRITE_ID then
-      local activeMon = getActiveFollowerMon(Game, true) or getActiveFollowerMon(Game, false)
-      if not activeMon then return end
-      local species = activeMon.species or FALLBACK_SPECIES
-      local followerImg = getFollowerImage(species)
+  function SpriteRenderer:draw(px, py, camX, camY, facing, walkPhase, stepFlip)
+    if self.def and self.def.id == SPRITE_ID then
+      -- ONLY draw raw PNG if colorMode() (PaletteFX.mode == "redpp") is active
+      if colorMode() then
+        local activeMon = getActiveFollowerMon(Game, false)
+        if not activeMon then return end
+        local species = activeMon.species or FALLBACK_SPECIES
+        local followerImg = getFollowerImage(species)
 
-      local x = math.floor(px - camX)
-      local y = math.floor(py - camY) - 4
+        local x = math.floor(px - camX)
+        local y = math.floor(py - camY) - 4
 
-      local STAND = SpriteRenderer.STAND or {}
-      local WALK = SpriteRenderer.WALK or {}
-      local dirMap = (walkPhase == 1) and WALK or STAND
-      local frameIdx = dirMap[facing] or 0
-      local quad = self.frames and (self.frames[frameIdx] or self.frames[1]) or {0, 0, 16, 16}
-      local flip = (facing == "right") or (stepFlip and (facing == "up" or facing == "down"))
+        local STAND = SpriteRenderer.STAND
+        local WALK = SpriteRenderer.WALK
+        local dirMap = (walkPhase == 1) and WALK or STAND
+        local frameIdx = dirMap[facing] or 0
+        local quad = self.frames and (self.frames[frameIdx] or self.frames[1]) or {0, 0, 16, 16}
+        local flip = (facing == "right") or (stepFlip and (facing == "up" or facing == "down"))
 
-      local drawX = flip and (x + 16) or x
-      local flipSx = flip and -1 or 1
+        local drawX = flip and (x + 16) or x
+        local flipSx = flip and -1 or 1
 
-      PaletteFX.markSpriteRedraw(followerImg, quad, drawX, y, flipSx, nil, false)
-      return
+        PaletteFX.markSpriteRedraw(followerImg, quad, drawX, y, flipSx, nil, false)
+        return
+      end
     end
-    if origSpriteDraw then
-      return origSpriteDraw(self, px, py, camX, camY, facing, walkPhase, stepFlip)
-    end
+    
+    -- In OG / SGB / non-advanced modes, fall back to standard game boy drawing
+    return origSpriteDraw(self, px, py, camX, camY, facing, walkPhase, stepFlip)
   end
 
   -- Update / Map / Interaction Hooks

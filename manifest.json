@@ -18,7 +18,6 @@
     "pokepc_followers_rb"
   ],
   "affects_link": false,
-  "options_schema": "options.lua",
   "github": "gamecorner-033/PokePCFollowers",
   "description": "All 151 Gen 1 overworld followers with persistent party selection and full 2D/voxel compatibility for Red, Blue, and Yellow."
 }
