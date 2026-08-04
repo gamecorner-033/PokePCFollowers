@@ -1,20 +1,41 @@
-{
-  "title": "PokéPC Followers Mod",
-  "summary": "All 151 Gen 1 overworld followers with voxel/tilt compatibility for Red, Blue, and Yellow.",
-  "author": "Antigravity & User",
-  "version": "1.1.1",
-  "tags": [
-    "graphics",
-    "followers",
-    "ui"
-  ],
-  "features": [
-    "All 151 Gen 1 Pokémon overworld sprites supported",
-    "Party Slot 1 default follower with automatic lead switching",
-    "Party Menu 'FOLLOWER' UI option for explicit follower selection",
-    "Full-color GBA overworld graphics over colorized terrain",
-    "Red and Blue follower spawning without Yellow-only story flags",
-    "Animated overworld walking frames enabled for all follower sprites"
-  ],
-  "description": "All 151 Gen 1 overworld followers with Dramatic Shape voxel/tilt compatibility for Red, Blue, and Yellow."
+return {
+  summary = "All 151 Gen 1 followers with persistent selection in Red, Blue, and Yellow.",
+  author = "Antigravity & User",
+  contact = "https://github.com/gamecorner-033/PokePCFollowers",
+  tags = { "graphics", "followers", "ui", "voxel" },
+  differences = {
+    changed = {
+      "the first healthy party member follows the player by default",
+      "an explicitly selected follower survives party reordering and evolution",
+      "biking, surfing, and an all-fainted party temporarily hide the follower",
+    },
+    added = {
+      "all 151 Gen 1 follower sheets",
+      "Red and Blue spawning through Gen1Recomp's follower movement",
+      "party-menu follower selection",
+    },
+    known = {
+      "requires the engine_internals permission for the follower spawn seam",
+      "do not enable another mod that owns SPRITE_PIKACHU at the same time",
+    },
+  },
+  credits = {
+    {
+      who = "ShockSlayer and the Pokémon Crystal Clear team",
+      for_ = "the Gen 1 and Gen 2 overworld follower sprites",
+    },
+    {
+      who = "Gen1Recomp contributors",
+      for_ = "the underlying Yellow follower movement implementation",
+    },
+    {
+      who = "Roxas2712",
+      for_ = "follower support in Red and Blue",
+    },
+    {
+      who = "TheRhysWyrill",
+      for_ = "color support of party Pokémon",
+    },
+  },
+  compat = { engine = ">=0.0.0-dev <1.0.0", modApi = 2 },
 }
