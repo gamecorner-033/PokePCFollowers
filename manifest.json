@@ -5,7 +5,7 @@
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
-  "author": "Antigravity & User",
+  "author": "Antigravity & gamecorner33",
   "category": "GRAPHICS",
   "game_version": ">=0.0.0-dev <1.0.0",
   "priority": 50,
